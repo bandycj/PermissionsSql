@@ -6,20 +6,23 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
+
 import javax.sql.DataSource;
 
 import org.sqlite.SQLiteDataSource;
 
+import com.microsoft.sqlserver.jdbc.SQLServerDataSource;
 import com.mysql.jdbc.jdbc2.optional.MysqlDataSource;
 
 public abstract class SqlStorage {
-
+	private static final Logger log = Logger.getLogger("Minecraft." + SqlStorage.class.getName());
+	
     private static Dbms dbms;
     private static DataSource dbSource;
     private static boolean init = false;
@@ -42,13 +45,13 @@ public abstract class SqlStorage {
         create.add("CREATE TABLE IF NOT EXISTS PrEntries (" + " entryid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT," + " name VARCHAR(32) NOT NULL," + " worldid INTEGER NOT NULL," + " type TINYINT NOT NULL," + " CONSTRAINT NameWorld UNIQUE (name, worldid, type)," + " ENTRYINDEX" + " FOREIGN KEY(worldid) REFERENCES PrWorlds(worldid) ON DELETE CASCADE ON UPDATE CASCADE" + ")");
         create.add("CREATE TABLE IF NOT EXISTS PrPermissions (" + " permid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT," + " permstring VARCHAR(64) NOT NULL," + " entryid INTEGER NOT NULL," + " CONSTRAINT PrEntryPerm UNIQUE (entryid, permstring)," + " FOREIGN KEY(entryid) REFERENCES PrEntries(entryid) ON DELETE CASCADE ON UPDATE CASCADE" + ")");
         create.add("CREATE TABLE IF NOT EXISTS PrInheritance (" + " uinheritid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT," + " childid INTEGER NOT NULL," + " parentid INTEGER NOT NULL," + " parentorder INTEGER NOT NULL," + " CONSTRAINT PrParent UNIQUE (childid, parentid)," + " CONSTRAINT PrOrderedInheritance UNIQUE (childid, parentorder)," + " CONSTRAINT PrNoSelfInherit CHECK (childid <> parentid)," + " FOREIGN KEY(childid) REFERENCES PrEntries(entryid) ON DELETE CASCADE ON UPDATE CASCADE," + " FOREIGN KEY(parentid) REFERENCES PrEntries(entryid) ON DELETE CASCADE ON UPDATE CASCADE" + ")");
-        create.add("CREATE TABLE IF NOT EXISTS PrWorldBase (" + " worldid INTEGER NOT NULL," + " defaultid INTEGER," + " FOREIGN KEY(worldid) REFERENCES PrWorlds(worldid) ON DELETE CASCADE ON UPDATE CASCADE," + " FOREIGN KEY(defaultid) REFERENCES PrEntries(entryid) ON DELETE CASCADE ON UPDATE CASCADE" + ")");
+        create.add("CREATE TABLE IF NOT EXISTS PrWorldBase (" + " worldid INTEGER NOT NULL," + " defaultid INTEGER," + " FOREIGN KEY(worldid) REFERENCES PrWorlds(worldid) ON DELETE CASCADE ON UPDATE CASCADE," + " FOREIGN KEY(defaultid) REFERENCES PrEntries(entryid)" + ")");
         create.add("CREATE TABLE IF NOT EXISTS PrData (" + " dataid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT," + " entryid INTEGER NOT NULL ," + " path VARCHAR(64) NOT NULL," + " data VARCHAR(64) NOT NULL," + " CONSTRAINT PrDataUnique UNIQUE (entryid, path)," + " FOREIGN KEY(entryid) REFERENCES PrEntries(entryid) ON DELETE CASCADE ON UPDATE CASCADE" + ")");
         create.add("CREATE TABLE IF NOT EXISTS PrTracks (" + " trackid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT," + " trackname VARCHAR(64) NOT NULL UNIQUE," + " worldid INTEGER NOT NULL," + " CONSTRAINT TracksUnique UNIQUE (trackid, worldid)," + " FOREIGN KEY(worldid) REFERENCES PrWorlds(worldid) ON DELETE CASCADE ON UPDATE CASCADE" + ")");
-        create.add("CREATE TABLE IF NOT EXISTS PrTrackGroups (" + " trackgroupid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT," + " trackid INTEGER NOT NULL," + " gid INTEGER NOT NULL," + " groupOrder INTEGER NOT NULL," + " CONSTRAINT TrackGroupsUnique UNIQUE (trackname, gid)," + " FOREIGN KEY(trackid) REFERENCES PrTracks(trackid) ON DELETE CASCADE ON UPDATE CASCADE," + " FOREIGN KEY(gid) REFERENCES PrEntries(entryid) ON DELETE CASCADE ON UPDATE CASCADE" + ")");
+        create.add("CREATE TABLE IF NOT EXISTS PrTrackGroups (" + " trackgroupid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT," + " trackid INTEGER NOT NULL," + " gid INTEGER NOT NULL," + " groupOrder INTEGER NOT NULL," + " CONSTRAINT TrackGroupsUnique UNIQUE (trackid, gid)," + " FOREIGN KEY(trackid) REFERENCES PrTracks(trackid) ON DELETE CASCADE ON UPDATE CASCADE," + " FOREIGN KEY(gid) REFERENCES PrEntries(entryid) ON DELETE CASCADE ON UPDATE CASCADE" + ")");
     }
 
-    static Dbms getDbms() {
+    public static Dbms getDbms() {
         return dbms;
     }
 
@@ -57,17 +60,19 @@ public abstract class SqlStorage {
             return;
         }
 
-        System.out.println("[Permissions] Initializing Permissions 3 SQL interface.");
+        log.info("[Permissions] Initializing Permissions 3 SQL interface.");
         // SqlStorage.reloadDelay = reloadDelay;
         try {
             dbms = Dbms.valueOf(dbmsName);
-        } catch (IllegalArgumentException e) {
+        } catch (Exception e) {
+        	e.printStackTrace();
             System.err.println("[Permissions] Error occurred while selecting permissions config DBMS. Reverting to SQLite.");
             dbms = Dbms.SQLITE;
         }
         try {
             Class.forName(dbms.getDriver());
-        } catch (ClassNotFoundException e) {
+        } catch (Exception e) {
+        	e.printStackTrace();
             throw new Exception("[Permissions] Unable to load SQL driver!", e);
         }
         dbSource = dbms.getSource(username, password, uri);
@@ -99,14 +104,29 @@ public abstract class SqlStorage {
                 if (dbms == Dbms.MYSQL) {
                     state = state.replace("AUTOINCREMENT", "AUTO_INCREMENT");
                     state = state.replace(" ENTRYINDEX", " INDEX pr_entryname_index(name),");
+                } else if (dbms == Dbms.MSSQL){
+                	state = state.replace("AUTOINCREMENT", "IDENTITY");
+                	String tableName = state.substring(state.indexOf("Pr"), state.indexOf("("));
+                	state = state.replace("CREATE TABLE IF NOT EXISTS", "IF NOT EXISTS(SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='"+tableName+"') CREATE TABLE ");
+                	state = state.replace(" ON DELETE CASCADE ON UPDATE CASCADE", "");
+                	state = state.replace(" ENTRYINDEX", "");
                 } else {
                     state = state.replace(" ENTRYINDEX", "");
                 }
+                log.info(state);
                 s.executeUpdate(state + engine);
             }
-            if (dbms != Dbms.MYSQL) {
-                s.executeUpdate("CREATE INDEX IF NOT EXISTS pr_entry_index ON PrEntries(name);");
+            if (dbms == Dbms.SQLITE) {
+            	String state="CREATE INDEX IF NOT EXISTS pr_entry_index ON PrEntries(name);";
+            	log.info(state);
+                s.executeUpdate(state);
+            } else if (dbms == Dbms.MSSQL){
+            	String state = "IF NOT EXISTS(SELECT name FROM sysindexes WHERE name = 'pr_entry_index') CREATE INDEX pr_entry_index ON PrEntries(name)";
+            	log.info(state);
+                s.executeUpdate(state);
             }
+        } catch (Exception e){
+        	log.severe(e.getMessage());
         } finally {
             if (s != null)
                 s.close();
@@ -115,25 +135,25 @@ public abstract class SqlStorage {
         }
     }
 
-    static DataSource getSource() {
+    public static DataSource getSource() {
         return dbSource;
     }
 
-    static int getWorld(String name) {
+    public static int getWorld(String name) {
         if (worldMap.containsKey(name)) {
-            // System.out.println(worldMap.get(name));
+            // log.info(worldMap.get(name));
             return worldMap.get(name);
         }
         Object[] params = new Object[] { name };
         List<Object[]> results = runQuery(getWorld, params, true, 1);
         if (results.isEmpty()) {
-            System.out.println("[Permissions] Creating world '" + name + "'.");
+            log.info("[Permissions] Creating world '" + name + "'.");
             runUpdate(createWorld, params);
             results = runQuery(getWorld, params, true, 1);
         }
         int id = -1;
         Iterator<Object[]> iter = results.iterator();
-        // System.out.println(results);
+        // log.info(results);
         if (iter.hasNext()) {
             Object o = iter.next()[0];
             if (o instanceof Integer) {
@@ -144,7 +164,7 @@ public abstract class SqlStorage {
         return id;
     }
 
-    static int getEntry(String world, String name, boolean isGroup) {
+    public static int getEntry(String world, String name, boolean isGroup) {
         SqlEntryStorage ses = isGroup ? getGroupStorage(world) : getUserStorage(world);
         Integer cachedId = ses.getCachedId(name);
         if (cachedId != null) {
@@ -154,7 +174,7 @@ public abstract class SqlStorage {
         Object[] params = new Object[] { worldid, (byte) (isGroup ? 1 : 0), name };
         List<Object[]> results = runQuery(getEntry, params, true, 1);
         if (results.isEmpty()) {
-            System.out.println("[Permissions] Creating " + (isGroup ? "group" : "user") + " '" + name + "' in world '" + world + "'.");
+            log.info("[Permissions] Creating " + (isGroup ? "group" : "user") + " '" + name + "' in world '" + world + "'.");
             runUpdate(createEntry, params);
             results = runQuery(getEntry, params, true, 1);
         }
@@ -169,7 +189,7 @@ public abstract class SqlStorage {
         return id;
     }
 
-    static String getWorldName(int id) {
+    public static String getWorldName(int id) {
         List<Object[]> results = runQuery(getWorldName, new Object[] { id }, true, 1);
         Iterator<Object[]> iter = results.iterator();
         String name = "Error";
@@ -182,7 +202,7 @@ public abstract class SqlStorage {
         return name;
     }
 
-    static NameWorldId getEntryName(int id) {
+    public static NameWorldId getEntryName(int id) {
         List<Object[]> results = runQuery(getEntryName, new Object[] { id }, true, 1, 2);
         Iterator<Object[]> iter = results.iterator();
         NameWorldId nw = new NameWorldId();
@@ -205,7 +225,7 @@ public abstract class SqlStorage {
         return nw;
     }
 
-    static SqlUserStorage getUserStorage(String world) {
+    public static SqlUserStorage getUserStorage(String world) {
         if (userStores.containsKey(world)) {
             return userStores.get(world);
         }
@@ -214,7 +234,7 @@ public abstract class SqlStorage {
         return sus;
     }
 
-    static SqlGroupStorage getGroupStorage(String world) {
+    public static SqlGroupStorage getGroupStorage(String world) {
         if (groupStores.containsKey(world)) {
             return groupStores.get(world);
         }
@@ -243,8 +263,9 @@ public abstract class SqlStorage {
         public String name;
     }
 
-    static List<Object[]> runQuery(String statement, Object[] params, boolean single, int... dataCols) {
-        Connection dbConn;
+    public static List<Object[]> runQuery(String statement, Object[] params, boolean single, int... dataCols) {
+    	log.info(statement);
+    	Connection dbConn;
         try {
             dbConn = getConnection();
         } catch (SQLException e) {
@@ -261,10 +282,11 @@ public abstract class SqlStorage {
         return data;
     }
 
-    static List<Object[]> runQuery(Connection dbConn, String statement, Object[] params, boolean single, int... dataCols) {
+    public static List<Object[]> runQuery(Connection dbConn, String statement, Object[] params, boolean single, int... dataCols) {
         if (dataCols == null || dataCols.length == 0) {
             return null;
         }
+        log.info(statement);
         List<Object[]> results = new LinkedList<Object[]>();
 
         PreparedStatement stmt = null;
@@ -298,8 +320,9 @@ public abstract class SqlStorage {
         return results;
     }
 
-    static int runUpdate(String statement, Object[] params) {
-        Connection dbConn;
+    public static int runUpdate(String statement, Object[] params) {
+    	log.info(statement);
+    	Connection dbConn;
         try {
             dbConn = getConnection();
         } catch (SQLException e) {
@@ -317,8 +340,15 @@ public abstract class SqlStorage {
         
     }
     
-    static int runUpdate(Connection dbConn, String statement, Object[] params) {
-        String sql = dbms == Dbms.SQLITE ? statement.replace("INSERT IGNORE", "INSERT OR IGNORE") : statement;
+    public static int runUpdate(Connection dbConn, String statement, Object[] params) {
+    	
+    	String sql=statement;
+    	
+    	switch(dbms){
+    		case SQLITE:sql=statement.replace("INSERT IGNORE", "INSERT OR IGNORE"); break;
+    		case MSSQL:sql=statement.replace("IGNORE", ""); break;
+    	}
+    	log.info(sql);
         int result = -1;
 
         PreparedStatement stmt = null;
@@ -341,7 +371,7 @@ public abstract class SqlStorage {
         return result;
     }
 
-    static void fillStatement(PreparedStatement stmt, Object[] params) throws SQLException {
+    public static void fillStatement(PreparedStatement stmt, Object[] params) throws SQLException {
         stmt.clearParameters();
         if (params == null)
             return;
@@ -356,7 +386,7 @@ public abstract class SqlStorage {
 
 enum Dbms {
 
-    SQLITE("org.sqlite.JDBC"), MYSQL("com.mysql.jdbc.Driver");
+    SQLITE("org.sqlite.JDBC"), MYSQL("com.mysql.jdbc.Driver"),MSSQL("com.microsoft.sqlserver.jdbc.SQLServerDriver");
     private final String driver;
 
     Dbms(String driverClass) {
@@ -369,6 +399,12 @@ enum Dbms {
 
     public DataSource getSource(String username, String password, String url) {
         switch (this) {
+        case MSSQL:
+        	SQLServerDataSource msds = new SQLServerDataSource();
+        	msds.setUser(username);
+        	msds.setPassword(password);
+        	msds.setURL(url);
+        	return msds;
         case MYSQL:
             MysqlDataSource mds = new MysqlDataSource();
             mds.setUser(username);

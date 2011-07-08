@@ -1,4 +1,5 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.nijikokun.bukkit</groupId>
 	<artifactId>PermissionsSql</artifactId>
@@ -26,30 +27,41 @@
 					<target>1.6</target>
 				</configuration>
 			</plugin>
-<!-- 			<plugin>
-				<artifactId>maven-assembly-plugin</artifactId>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<version>2.1</version>
 				<configuration>
-					<descriptors>
-						<descriptor>src/main/assembly/package.xml</descriptor>
-					</descriptors>
+					<archive>
+						<manifest>
+							<addClasspath>true</addClasspath>
+							<addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+							<addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
+						</manifest>
+						<manifestEntries>
+							<Class-Path>../lib/sqljdbc4.jar</Class-Path>
+						</manifestEntries>
+					</archive>
 				</configuration>
-				<executions>
-					<execution>
-						<id>build</id>
-						<phase>package</phase>
-						<goals>
-							<goal>single</goal>
-						</goals>
-					</execution>
-				</executions>
-			</plugin> -->
+			</plugin>
+			<!-- <plugin> <artifactId>maven-assembly-plugin</artifactId> <configuration> 
+				<descriptors> <descriptor>src/main/assembly/package.xml</descriptor> </descriptors> 
+				</configuration> <executions> <execution> <id>build</id> <phase>package</phase> 
+				<goals> <goal>single</goal> </goals> </execution> </executions> </plugin> -->
 		</plugins>
 	</build>
 	<dependencies>
 		<dependency>
+			<groupId>com.microsoft.sqlserver.jdbc</groupId>
+			<artifactId>sqljdbc4</artifactId>
+			<version>4.0</version>
+			<type>jar</type>
+			<scope>compile</scope>
+		</dependency>
+		<dependency>
 			<groupId>mysql</groupId>
 			<artifactId>mysql-connector-java</artifactId>
-			<version>5.1.16</version>
+			<version>5.1.17</version>
 			<type>jar</type>
 			<scope>compile</scope>
 		</dependency>
